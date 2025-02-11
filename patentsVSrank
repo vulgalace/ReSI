@@ -1,0 +1,55 @@
+# Load libraries
+library(readxl)
+library(ggplot2)
+library(gridExtra)
+
+# Define the path to your Excel file (update the path accordingly)
+file_path <- "C:\\Users\\vulga\\Downloads\\IE Benchmarking MetricsCOPY.xlsx"
+
+# Read the first sheet of the Excel file
+my_data <- read_excel(file_path)
+
+# Quick data inspection
+head(my_data)
+str(my_data)
+summary(my_data)
+names(my_data)
+dim(my_data)
+
+# Filter the data to include only rows with Rank 20 or less
+my_data_top20 <- my_data[my_data$Rank <= 20, ]
+
+# Scatter plot for "Patents per Faculty" vs Rank using filtered data
+p1 <- ggplot(my_data_top20, aes(x = Rank, y = `Patents per Faculty`)) +
+  geom_point(color = "blue", alpha = 0.7) +
+  labs(x = "Rank",
+       y = "Patents per Faculty",
+       title = "Rank vs Patents per Faculty") +
+  theme_minimal()
+
+# Scatter plot for "Number Faculty With Patent" vs Rank using filtered data
+p2 <- ggplot(my_data_top20, aes(x = Rank, y = `Number Faculty With Patent`)) +
+  geom_point(color = "red", alpha = 0.7) +
+  labs(x = "Rank",
+       y = "Number Faculty With Patent",
+       title = "Rank vs Number Faculty With Patent") +
+  theme_minimal()
+
+# Scatter plot for "of Faculty With Patent" vs Rank using filtered data
+p3 <- ggplot(my_data_top20, aes(x = Rank, y = `% of Faculty With Patent`)) +
+  geom_point(color = "green", alpha = 0.7) +
+  labs(x = "Rank",
+       y = "% of Faculty With Patent",
+       title = "Rank vs of Faculty With Patent") +
+  theme_minimal()
+
+# Scatter plot for "Total Number Patents" vs Rank using filtered data
+p4 <- ggplot(my_data_top20, aes(x = Rank, y = `Total Number Patents`)) +
+  geom_point(color = "purple", alpha = 0.7) +
+  labs(x = "Rank",
+       y = "Total Number Patents",
+       title = "Rank vs Total Number Patents") +
+  theme_minimal()
+
+# Arrange the plots in a grid (2 columns)
+grid.arrange(p1, p2, p3, p4, ncol = 2)
