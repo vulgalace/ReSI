@@ -1,0 +1,177 @@
+# ------------------------------------------------------------------------------
+# INSTALL PACKAGES (Only once; you can comment out after the first time)
+# ------------------------------------------------------------------------------
+# install.packages(c("readxl", "dplyr", "tidyr", "ggplot2"))
+
+# ------------------------------------------------------------------------------
+# STEP 0. LOAD REQUIRED LIBRARIES
+# ------------------------------------------------------------------------------
+library(readxl)   # for reading Excel .xlsx files
+library(dplyr)    # for data manipulation (arrange, mutate, etc.)
+library(tidyr)    # for pivot_longer
+library(ggplot2)  # for plotting
+
+# ------------------------------------------------------------------------------
+# STEP 1. READ EXCEL AND RENAME COLUMNS
+# ------------------------------------------------------------------------------
+df <- read_excel("C:\\Users\\vulga\\jupyCOPY.xlsx") %>%
+  # Rename columns to simpler internal names
+  rename(
+    # If you have a column named "ROUTING #", ignoring it as you said it's irrelevant
+    year = YEAR,
+    ipeds_unit_id = IPEDS,
+    grad_rank = RANK,
+    discipline_name = DISCIPLINE,
+    school_name = UNIVERSITY,
+    
+    assistant_prof_sum = `ASSISTANT PROF SUM`,
+    associate_prof_sum = `ASSOCIATE PROF SUM`,
+    full_prof_sum = `FULL PROF SUM`,
+    full_time_research_fac_sum = `FT RESEARCH FAC. SUM`,
+    part_time_research_fac_sum = `PT RESEARCH FAC. SUM`,
+    
+    # The user mentioned ignoring "TOTAL T/TT FAC.", "FTE OF PT RESEARCH FAC. SUM"
+    # so we do not rename those. They won't be used.
+    
+    full_time_teaching_non_tenure_sum = `FT TEACHING FAC. (NONT) SUM`,
+    part_time_teaching_non_tenure_sum = `PT TEACHING FAC (NONT) SUM`
+    # ignoring "FTE OF PT TEACHING FAC. (NONT) SUM" as irrelevant
+  )
+
+# ------------------------------------------------------------------------------
+# STEP 2. SORT DATA & GROUP BY IPEDS (SCHOOL)
+# ------------------------------------------------------------------------------
+df <- df %>%
+  arrange(ipeds_unit_id, year) %>%
+  group_by(ipeds_unit_id)
+
+# ------------------------------------------------------------------------------
+# STEP 3. CREATE "NEXT YEAR" COLUMNS USING lead()
+# ------------------------------------------------------------------------------
+df <- df %>%
+  mutate(
+    assistant_next = lead(assistant_prof_sum),
+    associate_next = lead(associate_prof_sum),
+    full_next      = lead(full_prof_sum),
+    ft_res_next    = lead(full_time_research_fac_sum),
+    pt_res_next    = lead(part_time_research_fac_sum),
+    ft_teach_nt_next = lead(full_time_teaching_non_tenure_sum),
+    pt_teach_nt_next = lead(part_time_teaching_non_tenure_sum),
+    
+    rank_next      = lead(grad_rank),
+    year_next      = lead(year)
+  )
+
+# ------------------------------------------------------------------------------
+# STEP 4. COMPUTE YEAR-TO-YEAR DELTAS
+# ------------------------------------------------------------------------------
+df <- df %>%
+  mutate(
+    # Positive rank_change means rank number improved (got smaller)
+    rank_change = grad_rank - rank_next,
+    
+    assistant_change = assistant_next - assistant_prof_sum,
+    associate_change = associate_next - associate_prof_sum,
+    full_change      = full_next - full_prof_sum,
+    ft_res_change    = ft_res_next - full_time_research_fac_sum,
+    pt_res_change    = pt_res_next - part_time_research_fac_sum,
+    ft_teach_nt_change = ft_teach_nt_next - full_time_teaching_non_tenure_sum,
+    pt_teach_nt_change = pt_teach_nt_next - part_time_teaching_non_tenure_sum
+  ) %>%
+  # remove rows with no next year
+  filter(!is.na(year_next)) %>%
+  ungroup()
+
+# ------------------------------------------------------------------------------
+# STEP 5. CREATE A "year_transition" LABEL (e.g. "2019-2020")
+# ------------------------------------------------------------------------------
+df <- df %>%
+  mutate(year_transition = paste0(year, "-", year_next))
+
+# ------------------------------------------------------------------------------
+# STEP 6. PIVOT LONGER: ONE ROW PER FACULTY CATEGORY CHANGE
+# ------------------------------------------------------------------------------
+df_long <- df %>%
+  select(
+    ipeds_unit_id, school_name, discipline_name,
+    year_transition, rank_change,
+    assistant_change, associate_change, full_change,
+    ft_res_change, pt_res_change,
+    ft_teach_nt_change, pt_teach_nt_change
+  ) %>%
+  pivot_longer(
+    cols = c(
+      assistant_change, associate_change, full_change,
+      ft_res_change, pt_res_change,
+      ft_teach_nt_change, pt_teach_nt_change
+    ),
+    names_to = "faculty_category",
+    values_to = "faculty_change"
+  )
+
+# ------------------------------------------------------------------------------
+# STEP 7. FILTER TO YOUR TARGET TRANSITIONS & PLOT INDIVIDUALLY
+# ------------------------------------------------------------------------------
+# 1) Define the specific transitions you want to visualize
+target_transitions <- c(
+  "2015-2016", "2016-2017", "2017-2018", "2018-2019",
+  "2019-2020", "2020-2021", "2021-2022", "2022-2023"
+)
+
+# 2) Filter df_long to only those transitions
+df_long_filtered <- df_long %>%
+  filter(year_transition %in% target_transitions)
+
+# 3) Define your color map
+color_map <- c(
+  "assistant_change"   = "green",
+  "associate_change"   = "red",
+  "full_change"        = "blue",
+  "ft_res_change"      = "orange",
+  "pt_res_change"      = "purple",
+  "ft_teach_nt_change" = "brown",
+  "pt_teach_nt_change" = "pink"
+)
+
+# (Optional) If you'd like to create a subfolder to store plots:
+# dir.create("CompassPlots")
+
+# 4) Loop over each transition; create & save a separate plot
+for (yt in target_transitions) {
+  
+  # Subset data for a single transition
+  df_sub <- df_long_filtered %>%
+    filter(year_transition == yt)
+  
+  # Build the single-plot scatter (one transition => no facet)
+  p <- ggplot(df_sub, aes(x = rank_change, y = faculty_change, color = faculty_category)) +
+    geom_point(size = 3) +
+    geom_vline(xintercept = 0, color = "black") +
+    geom_hline(yintercept = 0, color = "black") +
+    scale_color_manual(values = color_map) +
+    labs(
+      title = paste("Compass Plot for", yt),
+      x = "Rank Change (+ = Rank Improved)",
+      y = "Faculty Change (+ = Gained Faculty)",
+      color = "Faculty Category"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
+    )
+  
+  # Print in RStudio's plot window
+  print(p)
+  
+  # Save the plot to a PNG file, with each transition in the filename
+  # If you made a subfolder "CompassPlots", add that path to filename:
+  # filename = paste0("CompassPlots/CompassPlot_", yt, ".png")
+  
+  ggsave(
+    filename = paste0("CompassPlot_", yt, ".png"),
+    plot = p,
+    width = 10,   # in inches, feel free to change
+    height = 8,   # in inches
+    dpi = 300
+  )
+}
