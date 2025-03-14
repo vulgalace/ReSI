@@ -1,0 +1,247 @@
+# Load necessary libraries
+library(tidyverse)
+library(ggplot2)
+library(scales)
+
+# Let's assume the data is in a CSV file named "university_data.csv"
+# Read the data
+university_data <- read.csv("C:\\Users\\vulga\\headsdata.csv")
+
+# Rename columns to avoid spaces and special characters
+names(university_data)[6] <- "GradRank" # Assuming 6th column is Grad Rank
+names(university_data)[7] <- "USNWRScore" # Assuming 7th column is USNWR Score
+names(university_data)[4] <- "DeptHeadSurname" # Assuming 4th column is Dept Head Surname
+names(university_data)[8] <- "Type" # Assuming 8th column is Type
+
+# First, calculate the "New Heads Delta" for the entire dataset (all universities)
+# This will be used across all plots
+calculate_new_heads_delta <- function(data) {
+  # Get unique years
+  years <- sort(unique(as.numeric(as.character(data$Year))))
+  
+  # Initialize results
+  results <- data.frame(
+    Year = years[-1],
+    PrevYear = years[-length(years)],
+    NewHeadsDelta = numeric(length(years) - 1)
+  )
+  
+  # Calculate new heads delta for each year transition
+  for (i in 1:(length(years) - 1)) {
+    year1 <- years[i]
+    year2 <- years[i + 1]
+    
+    # Filter data for the two consecutive years
+    data_year1 <- data %>% filter(Year == year1)
+    data_year2 <- data %>% filter(Year == year2)
+    
+    # Get all surnames from both years
+    surnames_year1 <- data_year1$DeptHeadSurname
+    surnames_year2 <- data_year2$DeptHeadSurname
+    
+    # Count truly new surnames (not transfers)
+    all_surnames <- unique(c(surnames_year1, surnames_year2))
+    new_surnames <- setdiff(surnames_year2, all_surnames[all_surnames %in% surnames_year1])
+    
+    # Calculate delta in new department heads
+    results$NewHeadsDelta[i] <- length(new_surnames)
+  }
+  
+  return(results)
+}
+
+# Calculate the global new heads delta
+global_new_heads <- calculate_new_heads_delta(university_data)
+
+# Function to compute average score deltas for a given subset
+compute_avg_score_delta <- function(data) {
+  # Get unique years
+  years <- sort(unique(as.numeric(as.character(data$Year))))
+  
+  # Initialize results
+  results <- data.frame(
+    Year = years[-1],
+    PrevYear = years[-length(years)],
+    AvgScoreDelta = numeric(length(years) - 1)
+  )
+  
+  # Calculate average score delta for each year transition
+  for (i in 1:(length(years) - 1)) {
+    year1 <- years[i]
+    year2 <- years[i + 1]
+    
+    # Filter data for the two consecutive years
+    data_year1 <- data %>% filter(Year == year1)
+    data_year2 <- data %>% filter(Year == year2)
+    
+    # Calculate average USNWR score for each year
+    avg_score_year1 <- mean(data_year1$USNWRScore, na.rm = TRUE)
+    avg_score_year2 <- mean(data_year2$USNWRScore, na.rm = TRUE)
+    
+    # Calculate delta in average scores
+    results$AvgScoreDelta[i] <- avg_score_year2 - avg_score_year1
+  }
+  
+  return(results)
+}
+
+# Define colors for each plot
+plot_colors <- c(
+  "All Universities" = "#1f77b4",  # Blue
+  "Top 18 Universities" = "#ff7f0e",  # Orange
+  "Top 18 Public Universities" = "#2ca02c",  # Green
+  "Top 18 Private Universities" = "#d62728",  # Red
+  "Top 10 Universities" = "#9467bd",  # Purple
+  "Top 5 Universities" = "#8c564b"   # Brown
+)
+
+# Define custom legend labels
+legend_labels <- c(
+  "All Universities" = "All Universities Score Delta",
+  "Top 18 Universities" = "Top 18 Universities Score Delta",
+  "Top 18 Public Universities" = "Top 18 Public Universities Score Delta",
+  "Top 18 Private Universities" = "Top 18 Private Universities Score Delta",
+  "Top 10 Universities" = "Top 10 Universities Score Delta",
+  "Top 5 Universities" = "Top 5 Universities Score Delta"
+)
+
+# Function to create dual-axis plot for a specific group
+create_dual_axis_plot <- function(metrics_data, title, plot_color, legend_label) {
+  # Handle case where data might be insufficient
+  if(nrow(metrics_data) == 0 || max(abs(metrics_data$AvgScoreDelta)) == 0) {
+    return(ggplot() + 
+             ggtitle(paste(title, "- Insufficient data")) + 
+             theme_minimal())
+  }
+  
+  # Join with global new heads delta
+  plot_data <- merge(metrics_data, global_new_heads[, c("Year", "NewHeadsDelta")], by = "Year")
+  
+  # Create label for x-axis
+  plot_data$YearLabel <- paste(plot_data$PrevYear, "-", plot_data$Year, sep="")
+  
+  # Create the plot
+  p <- ggplot(plot_data, aes(x = YearLabel)) +
+    # Plot average score delta on primary y-axis with the specific color
+    geom_line(aes(y = AvgScoreDelta, group = 1, color = legend_label), size = 1) +
+    geom_point(aes(y = AvgScoreDelta, color = legend_label), size = 3) +
+    
+    # Add a horizontal line at y = 0 for reference
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray") +
+    
+    # Create secondary y-axis for new heads delta
+    scale_y_continuous(
+      name = "Average USNWR Score Delta",
+      sec.axis = sec_axis(~ . * (max(abs(plot_data$NewHeadsDelta)) / max(abs(plot_data$AvgScoreDelta))), 
+                          name = "New Department Heads Delta")
+    ) +
+    
+    # Plot new heads delta on secondary y-axis (scaled)
+    geom_line(aes(y = NewHeadsDelta * (max(abs(plot_data$AvgScoreDelta)) / max(abs(plot_data$NewHeadsDelta))), 
+                  group = 1, color = "New Heads Delta"), size = 1) +
+    geom_point(aes(y = NewHeadsDelta * (max(abs(plot_data$AvgScoreDelta)) / max(abs(plot_data$NewHeadsDelta))), 
+                   color = "New Heads Delta"), size = 3) +
+    
+    # Customize colors and legend
+    scale_color_manual(name = "Metrics", 
+                       values = c(setNames(plot_color, legend_label), "New Heads Delta" = "red")) +
+    
+    # Add title and labels
+    labs(title = title,
+         x = "Year Transition") +
+    
+    # Theme customization
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 16, face = "bold", color = "black"),
+      axis.title.x = element_text(size = 12, color = "black"),
+      axis.title.y = element_text(size = 12, color = "black"),
+      axis.title.y.right = element_text(size = 12, color = "black"),
+      axis.text = element_text(color = "black"),
+      legend.position = "bottom",
+      legend.text = element_text(color = "black"),
+      legend.title = element_text(color = "black")
+    )
+  
+  return(p)
+}
+
+# For Top N calculations, we need to properly filter by rank within each year
+# This approach correctly selects the top N universities for each year
+
+# Function to get top N universities by year
+get_top_n_by_year <- function(data, n) {
+  result <- data %>%
+    group_by(Year) %>%
+    arrange(GradRank, .by_group = TRUE) %>%
+    slice_head(n = n) %>%
+    ungroup()
+  return(result)
+}
+
+# 1. All Universities
+all_metrics <- compute_avg_score_delta(university_data)
+plot_all <- create_dual_axis_plot(all_metrics, 
+                                  "Changes in USNWR Scores and Department Heads - All Universities", 
+                                  plot_colors["All Universities"],
+                                  legend_labels["All Universities"])
+
+# 2. Top 18 Universities
+top18_data <- get_top_n_by_year(university_data, 18)
+top18_metrics <- compute_avg_score_delta(top18_data)
+plot_top18 <- create_dual_axis_plot(top18_metrics, 
+                                    "Changes in USNWR Scores and Department Heads - Top 18 Universities", 
+                                    plot_colors["Top 18 Universities"],
+                                    legend_labels["Top 18 Universities"])
+
+# 3. Top 18 Public Universities
+top18_public_data <- university_data %>%
+  filter(Type == "Public") %>%
+  get_top_n_by_year(18)
+top18_public_metrics <- compute_avg_score_delta(top18_public_data)
+plot_top18_public <- create_dual_axis_plot(top18_public_metrics, 
+                                           "Changes in USNWR Scores and Department Heads - Top 18 Public Universities", 
+                                           plot_colors["Top 18 Public Universities"],
+                                           legend_labels["Top 18 Public Universities"])
+
+# 4. Top 18 Private Universities
+top18_private_data <- university_data %>%
+  filter(Type == "Private") %>%
+  get_top_n_by_year(18)
+top18_private_metrics <- compute_avg_score_delta(top18_private_data)
+plot_top18_private <- create_dual_axis_plot(top18_private_metrics, 
+                                            "Changes in USNWR Scores and Department Heads - Top 18 Private Universities", 
+                                            plot_colors["Top 18 Private Universities"],
+                                            legend_labels["Top 18 Private Universities"])
+
+# 5. Top 10 Universities
+top10_data <- get_top_n_by_year(university_data, 10)
+top10_metrics <- compute_avg_score_delta(top10_data)
+plot_top10 <- create_dual_axis_plot(top10_metrics, 
+                                    "Changes in USNWR Scores and Department Heads - Top 10 Universities", 
+                                    plot_colors["Top 10 Universities"],
+                                    legend_labels["Top 10 Universities"])
+
+# 6. Top 5 Universities
+top5_data <- get_top_n_by_year(university_data, 5)
+top5_metrics <- compute_avg_score_delta(top5_data)
+plot_top5 <- create_dual_axis_plot(top5_metrics, 
+                                   "Changes in USNWR Scores and Department Heads - Top 5 Universities", 
+                                   plot_colors["Top 5 Universities"],
+                                   legend_labels["Top 5 Universities"])
+
+# Save the plots
+ggsave("plot_all.png", plot_all, width = 10, height = 6)
+ggsave("plot_top18.png", plot_top18, width = 10, height = 6)
+ggsave("plot_top18_public.png", plot_top18_public, width = 10, height = 6)
+ggsave("plot_top18_private.png", plot_top18_private, width = 10, height = 6)
+ggsave("plot_top10.png", plot_top10, width = 10, height = 6)
+ggsave("plot_top5.png", plot_top5, width = 10, height = 6)
+
+# Display plots individually (uncomment to view)
+print(plot_all)
+print(plot_top18)
+print(plot_top18_public)
+print(plot_top18_private)
+print(plot_top10)
+print(plot_top5)
