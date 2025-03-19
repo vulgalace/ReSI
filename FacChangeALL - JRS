@@ -1,5 +1,8 @@
 # ------------------------------------------------------------------------------
-# SCRIPT A: ALL SCHOOLS - STATISTICS + COMPASS PLOTS (ANNOTATED), NO SAVING TO FOLDERS
+# SCRIPT: ALL SCHOOLS - OUTLIERS REMOVED, STATISTICS + SINGLE-FACULTY PLOTS
+# ------------------------------------------------------------------------------
+# Removes rows where abs(rank_change) > 20 OR abs(...) > 20 in any faculty column
+# Then performs the same analysis and plotting (one plot per faculty type).
 # ------------------------------------------------------------------------------
 
 # install.packages(c("readxl","dplyr","tidyr","ggplot2","Hmisc")) # if needed
@@ -10,7 +13,7 @@ library(ggplot2)
 library(Hmisc) # for rcorr (correlation + significance)
 
 # 1. Read Excel & Rename
-df <- read_excel("C:\\Users\\vulga\\jupyCOPY.xlsx") %>%
+df <- read_excel("/Users/vulgalace/Downloads/jupyCOPY.xlsx") %>%
   rename(
     year = YEAR,
     ipeds_unit_id = IPEDS,
@@ -77,15 +80,32 @@ target_transitions <- c(
 df_filtered <- df %>%
   filter(year_transition %in% target_transitions)
 
-# 7. Statistical Analysis (Console Output)
-cat("\n--- DESCRIPTIVE STATISTICS (All Schools) ---\n")
-summary(df_filtered[, c("rank_change",
-                        "assistant_change","associate_change","full_change",
-                        "ft_res_change","pt_res_change",
-                        "ft_teach_nt_change","pt_teach_nt_change")])
+# 7. Remove Outliers: abs(rank_change) > 20 or abs(any faculty_change) > 20
+df_filtered_no_outliers <- df_filtered %>%
+  filter(
+    abs(rank_change) <= 20,
+    abs(assistant_change)   <= 20,
+    abs(associate_change)   <= 20,
+    abs(full_change)        <= 20,
+    abs(ft_res_change)      <= 20,
+    abs(pt_res_change)      <= 20,
+    abs(ft_teach_nt_change) <= 20,
+    abs(pt_teach_nt_change) <= 20
+  )
 
-cat("\n--- CORRELATION MATRIX (Pearson) ---\n")
-df_cor <- df_filtered %>%
+cat("\n--- REMOVED OUTLIERS ---\n")
+cat("Rows before removing outliers:", nrow(df_filtered), "\n")
+cat("Rows after removing outliers :", nrow(df_filtered_no_outliers), "\n\n")
+
+# 8. Statistical Analysis (Console Output)
+cat("\n--- DESCRIPTIVE STATISTICS (All Schools, Outliers Removed) ---\n")
+summary(df_filtered_no_outliers[, c("rank_change",
+                                    "assistant_change","associate_change","full_change",
+                                    "ft_res_change","pt_res_change",
+                                    "ft_teach_nt_change","pt_teach_nt_change")])
+
+cat("\n--- CORRELATION MATRIX (Pearson, Outliers Removed) ---\n")
+df_cor <- df_filtered_no_outliers %>%
   select(rank_change, assistant_change, associate_change, full_change,
          ft_res_change, pt_res_change, ft_teach_nt_change, pt_teach_nt_change)
 rc <- rcorr(as.matrix(df_cor), type="pearson")
@@ -94,92 +114,121 @@ print(rc$r)
 cat("\nP-values:\n")
 print(rc$P)
 
-cat("\n--- MULTIPLE REGRESSION: rank_change ~ faculty changes ---\n")
+cat("\n--- MULTIPLE REGRESSION: rank_change ~ faculty changes (Outliers Removed) ---\n")
 model_all <- lm(rank_change ~ assistant_change + associate_change + full_change +
                   ft_res_change + pt_res_change + ft_teach_nt_change + pt_teach_nt_change,
-                data=df_filtered)
+                data=df_filtered_no_outliers)
 print(summary(model_all))
 
-# 8. Loop Over Each Transition -> Plot in Viewer (Annotated)
-for (yt in target_transitions) {
-  cat("\nProcessing transition:", yt, "\n")
+# ------------------------------------------------------------------------------
+# 9. SINGLE-FACULTY PLOTS (All Target Transitions Combined, Outliers Removed)
+# ------------------------------------------------------------------------------
+# We'll now create combined plots for each faculty type. 
+# Each plot uses *all* rows in df_filtered_no_outliers.
+# The dot color is #555960 for every school except Purdue, which is #cfb991.
+# The title uses official labels (e.g. "Associate Professors" instead of associate_change).
+
+# Map the column names to official faculty labels for the plot title/Y-axis
+fac_type_labels <- c(
+  "assistant_change"     = "Assistant Professors",
+  "associate_change"     = "Associate Professors",
+  "full_change"          = "Full Professors",
+  "ft_res_change"        = "Full-Time Research Faculty",
+  "pt_res_change"        = "Part-Time Research Faculty",
+  "ft_teach_nt_change"   = "Full-Time Teaching (Nontenure)",
+  "pt_teach_nt_change"   = "Part-Time Teaching (Nontenure)"
+)
+
+# Define which faculty-change columns to examine:
+faculty_types <- c(
+  "assistant_change",
+  "associate_change",
+  "full_change",
+  "ft_res_change",
+  "pt_res_change",
+  "ft_teach_nt_change",
+  "pt_teach_nt_change"
+)
+
+for(fac_type in faculty_types) {
+  cat("\n----------------------------------------\n")
+  cat("FACULTY TYPE:", fac_type, "\n")
+  cat("----------------------------------------\n")
   
-  # Subset data
-  df_sub_wide <- df_filtered %>%
-    filter(year_transition == yt)
+  # Prepare a simplified dataframe for plotting:
+  df_sub <- df_filtered_no_outliers %>%
+    select(school_name, rank_change, !!sym(fac_type)) %>%
+    filter(!is.na(rank_change) & !is.na(!!sym(fac_type)))  # drop NA rows
   
-  if(nrow(df_sub_wide) == 0) {
-    cat("   No rows for this transition.\n")
+  # If no data remain, skip
+  if(nrow(df_sub) == 0) {
+    cat("No valid rows for", fac_type, ". Skipping.\n")
     next
   }
   
-  # Make a total_fac_change col for correlation
-  df_sub_wide <- df_sub_wide %>%
-    mutate(total_fac_change = assistant_change + associate_change + full_change +
-             ft_res_change + pt_res_change +
-             ft_teach_nt_change + pt_teach_nt_change)
+  # Create a 'color' column based on whether the school_name is Purdue:
+  df_sub <- df_sub %>%
+    mutate(plot_color = ifelse(school_name == "Purdue University", 
+                               "#cfb991",    # for Purdue
+                               "#555960"))   # for all others
   
-  # Pearson correlation for rank_change vs total_fac_change
-  corr_test <- cor.test(df_sub_wide$rank_change, df_sub_wide$total_fac_change, method="pearson")
-  r_val <- corr_test$estimate
-  r_sq <- r_val^2
-  p_val <- corr_test$p.value
+  # Fit a simple linear regression: fac_change ~ rank_change
+  formula_str <- paste0(fac_type, " ~ rank_change")
+  model_fac <- lm(as.formula(formula_str), data = df_sub)
   
-  corr_label <- paste0("R^2 = ", round(r_sq, 3),
-                       ", p = ", formatC(p_val, format="e", digits=2))
+  # Print model summary to console
+  cat("Regression summary:\n")
+  print(summary(model_fac))
   
-  # Pivot to long for "compass" scatter
-  df_sub_long <- df_sub_wide %>%
-    select(
-      ipeds_unit_id, school_name, discipline_name, year_transition, rank_change,
-      assistant_change, associate_change, full_change,
-      ft_res_change, pt_res_change,
-      ft_teach_nt_change, pt_teach_nt_change
-    ) %>%
-    pivot_longer(
-      cols = c(
-        assistant_change, associate_change, full_change,
-        ft_res_change, pt_res_change,
-        ft_teach_nt_change, pt_teach_nt_change
-      ),
-      names_to = "faculty_category",
-      values_to = "faculty_change"
-    )
+  # Extract slope, intercept, R^2, and p-value for the slope
+  slope      <- coef(model_fac)[2]
+  intercept  <- coef(model_fac)[1]
+  r_squared  <- summary(model_fac)$r.squared
+  p_value    <- summary(model_fac)$coefficients[2,4]  # p-value for slope
   
-  color_map <- c(
-    "assistant_change"   = "green",
-    "associate_change"   = "red",
-    "full_change"        = "blue",
-    "ft_res_change"      = "orange",
-    "pt_res_change"      = "purple",
-    "ft_teach_nt_change" = "brown",
-    "pt_teach_nt_change" = "pink"
+  # Build annotation text for the plot
+  annot_text <- paste0(
+    "y = ", round(slope, 3), "x + ", round(intercept, 3),
+    "\nR² = ", round(r_squared, 3),
+    ", p = ", formatC(p_value, format = "e", digits = 2)
   )
   
-  p <- ggplot(df_sub_long, aes(x = rank_change, y = faculty_change, color = faculty_category)) +
-    geom_point(size=3) +
-    geom_vline(xintercept=0, color="black") +
-    geom_hline(yintercept=0, color="black") +
-    scale_color_manual(values=color_map) +
+  # Determine extremes for annotation placement
+  x_min <- min(df_sub$rank_change, na.rm = TRUE)
+  x_max <- max(df_sub$rank_change, na.rm = TRUE)
+  y_min <- min(df_sub[[fac_type]], na.rm = TRUE)
+  y_max <- max(df_sub[[fac_type]], na.rm = TRUE)
+  
+  # Official label for the current faculty type:
+  fac_label <- fac_type_labels[fac_type]
+  
+  # Build ggplot
+  p_fac <- ggplot(df_sub, aes(x = rank_change, y = !!sym(fac_type))) +
+    # color each point using its hex code
+    geom_point(aes(color = plot_color), size = 3) +
+    scale_color_identity(guide = "none") +
+    geom_smooth(method = "lm", se = FALSE, color = "black") +  # add regression line
+    geom_vline(xintercept = 0, color = "black") +
+    geom_hline(yintercept = 0, color = "black") +
+    theme_minimal() +
     labs(
-      title = paste("Compass Plot (All Schools):", yt),
-      x = "Rank Change (+ = Improved)",
-      y = "Faculty Change (+ = Gained Faculty)",
-      color = "Faculty Category"
+      title = paste0("All Transitions – ", fac_label),
+      x = "Rank Change (+ = Improved Ranking)",
+      y = paste0(fac_label, " (+ = Gained Faculty)")
     ) +
-    theme_minimal()
+    # place annotation in top-left corner by default
+    annotate(
+      "text",
+      x = x_min,
+      y = y_max,
+      label = annot_text,
+      hjust = 0,
+      vjust = 1,
+      size = 4,
+      fontface = "bold"
+    )
   
-  # Place annotation in top-left corner
-  xPos <- min(df_sub_long$rank_change, na.rm=TRUE)
-  yPos <- max(df_sub_long$faculty_change, na.rm=TRUE)
-  
-  p_annotated <- p +
-    annotate("text", x = xPos, y = yPos,
-             label = paste("Corr rank vs total_fac:", corr_label),
-             hjust = 0, vjust = 1, size=4, fontface="bold")
-  
-  # Show in RStudio Viewer
-  print(p_annotated)
+  print(p_fac)
 }
 
-cat("\nDone! All results displayed in console, and plots shown in the Viewer.\n")
+cat("\nDone! One plot per faculty type displayed in the viewer.\n")
