@@ -1,10 +1,10 @@
 # ------------------------------------------------------------------------------
-# SCRIPT: TOP 18 SCHOOLS, PRIVATE ONLY, (RANK <= 18, TYPE="Private"), 
+# SCRIPT: TOP 18 SCHOOLS, PRIVATE ONLY (RANK <= 18, TYPE="Private"), 
 # OUTLIERS REMOVED, STATISTICS + PLOTS
 # ------------------------------------------------------------------------------
 # 1) Reads data, calculates changes
 # 2) Filters to transitions 2015-16 through 2022-23
-# 3) Keeps only schools that ALWAYS had rank <= 18, and only "Private" 
+# 3) Keeps only schools that ALWAYS had rank <= 18, and only "Private"
 # 4) Removes outliers (±20)
 # 5) Performs stats & single-faculty plots
 # ------------------------------------------------------------------------------
@@ -34,7 +34,7 @@ df <- read_excel("C:\\Users\\vulga\\jupyCOPY.xlsx") %>%
     
     full_time_teaching_non_tenure_sum = `FT TEACHING FAC. (NONT) SUM`,
     part_time_teaching_non_tenure_sum = `PT TEACHING FAC (NONT) SUM`
-    # We leave 'TYPE' alone, so we can filter on it below
+    # 'TYPE' column is left as-is for filtering below
   )
 
 # 2. Sort & Group
@@ -87,22 +87,21 @@ df_filtered <- df %>%
   filter(year_transition %in% target_transitions)
 
 # 7. KEEP ONLY PRIVATE SCHOOLS & THEN TOP 18
-# First, keep only rows where TYPE == "Private"
 df_filtered_private <- df_filtered %>%
-  filter(TYPE == "Private")
+  filter(TYPE == "Private")  # keep only Private rows
 
-# Next, among these private schools, find which IPEDS IDs never exceed rank 18
+# Among these private schools, find which ipeds_unit_id's never exceed rank 18
 top_18_ids <- df_filtered_private %>%
-  dplyr::group_by(ipeds_unit_id) %>%
-  dplyr::summarise(
+  group_by(ipeds_unit_id) %>%
+  summarise(
     all_top_18 = all(grad_rank <= 18, na.rm = TRUE),
     .groups = "drop"
   ) %>%
-  dplyr::filter(all_top_18) %>%
-  dplyr::pull(ipeds_unit_id)
+  filter(all_top_18) %>%
+  pull(ipeds_unit_id)
 
 df_filtered_private_top18 <- df_filtered_private %>%
-  dplyr::filter(ipeds_unit_id %in% top_18_ids)
+  filter(ipeds_unit_id %in% top_18_ids)
 
 cat("\n--- RETAINING ONLY 'PRIVATE' & 'TOP 18' SCHOOLS ---\n")
 cat("Rows before restricting:", nrow(df_filtered), "\n")
@@ -152,12 +151,11 @@ print(summary(model_all))
 # ------------------------------------------------------------------------------
 # 10. SINGLE-FACULTY PLOTS (All Target Transitions, Private + Top 18, Outliers Removed)
 # ------------------------------------------------------------------------------
-# We'll now create combined plots for each faculty type. 
-# Each plot uses *all* rows in df_filtered_no_outliers (Private, Top 18, outliers removed).
-# The dot color is #555960 for every school except Purdue, which is #cfb991.
-# The title uses official labels (e.g. "Associate Professors" instead of associate_change).
+# We'll now create combined plots for each faculty type.
+# Each plot uses rows in df_filtered_no_outliers (Private, Top 18, outliers removed).
+# Purdue is #cfb991, all others #000000.
+# Regression line is red; slope/intercept/R²/p-value printed to console only.
 
-# Map the column names to official faculty labels for the plot title/Y-axis
 fac_type_labels <- c(
   "assistant_change"     = "Assistant Professors",
   "associate_change"     = "Associate Professors",
@@ -168,7 +166,6 @@ fac_type_labels <- c(
   "pt_teach_nt_change"   = "Part-Time Teaching (Nontenure)"
 )
 
-# Define which faculty-change columns to examine:
 faculty_types <- c(
   "assistant_change",
   "associate_change",
@@ -187,7 +184,7 @@ for(fac_type in faculty_types) {
   # Prepare a simplified dataframe for plotting:
   df_sub <- df_filtered_no_outliers %>%
     select(school_name, rank_change, !!sym(fac_type)) %>%
-    filter(!is.na(rank_change) & !is.na(!!sym(fac_type)))  # drop NA rows
+    filter(!is.na(rank_change) & !is.na(!!sym(fac_type)))
   
   # If no data remain, skip
   if(nrow(df_sub) == 0) {
@@ -195,66 +192,45 @@ for(fac_type in faculty_types) {
     next
   }
   
-  # Create a 'color' column based on whether the school_name is Purdue:
+  # Create color column (Purdue vs. others)
   df_sub <- df_sub %>%
-    mutate(plot_color = ifelse(school_name == "Purdue University", 
-                               "#cfb991",    # for Purdue
-                               "#555960"))   # for all others
+    mutate(plot_color = ifelse(school_name == "Purdue University",
+                               "#cfb991",
+                               "#000000"))
   
   # Fit a simple linear regression: fac_change ~ rank_change
   formula_str <- paste0(fac_type, " ~ rank_change")
   model_fac <- lm(as.formula(formula_str), data = df_sub)
   
-  # Print model summary to console
   cat("Regression summary:\n")
   print(summary(model_fac))
   
-  # Extract slope, intercept, R^2, and p-value for the slope
+  # Extract slope, intercept, R^2, and p-value
   slope      <- coef(model_fac)[2]
   intercept  <- coef(model_fac)[1]
   r_squared  <- summary(model_fac)$r.squared
-  p_value    <- summary(model_fac)$coefficients[2,4]  # p-value for slope
+  p_value    <- summary(model_fac)$coefficients[2,4]
   
-  # Build annotation text for the plot
-  annot_text <- paste0(
-    "y = ", round(slope, 3), "x + ", round(intercept, 3),
-    "\nR² = ", round(r_squared, 3),
-    ", p = ", formatC(p_value, format = "e", digits = 2)
-  )
+  # Print equation info to console
+  cat("\n--- COPY/PASTE EQUATION INFO ---\n")
+  cat("Equation (", fac_type_labels[fac_type], "):\n")
+  cat("   y =", round(slope, 3), "x +", round(intercept, 3), "\n")
+  cat("   R^2 =", round(r_squared, 3), "\n")
+  cat("   p =", formatC(p_value, format = "e", digits = 2), "\n")
+  cat("----------------------------------------\n\n")
   
-  # Determine extremes for annotation placement
-  x_min <- min(df_sub$rank_change, na.rm = TRUE)
-  x_max <- max(df_sub$rank_change, na.rm = TRUE)
-  y_min <- min(df_sub[[fac_type]], na.rm = TRUE)
-  y_max <- max(df_sub[[fac_type]], na.rm = TRUE)
-  
-  # Official label for the current faculty type:
-  fac_label <- fac_type_labels[fac_type]
-  
-  # Build ggplot
+  # Build ggplot with a red regression line
   p_fac <- ggplot(df_sub, aes(x = rank_change, y = !!sym(fac_type))) +
-    # color each point using its hex code
     geom_point(aes(color = plot_color), size = 3) +
     scale_color_identity(guide = "none") +
-    geom_smooth(method = "lm", se = FALSE, color = "black") +  # add regression line
+    geom_smooth(method = "lm", se = FALSE, color = "red") +  # red line
     geom_vline(xintercept = 0, color = "black") +
     geom_hline(yintercept = 0, color = "black") +
     theme_minimal() +
     labs(
-      title = paste0("Private + Top 18 (Outliers Removed) – ", fac_label),
+      title = paste0("Private + Top 18 (Outliers Removed) – ", fac_type_labels[fac_type]),
       x = "Rank Change (+ = Improved Ranking)",
-      y = paste0(fac_label, " (+ = Gained Faculty)")
-    ) +
-    # place annotation in top-left corner by default
-    annotate(
-      "text",
-      x = x_min,
-      y = y_max,
-      label = annot_text,
-      hjust = 0,
-      vjust = 1,
-      size = 4,
-      fontface = "bold"
+      y = paste0(fac_type_labels[fac_type], " (+ = Gained Faculty)")
     )
   
   print(p_fac)
