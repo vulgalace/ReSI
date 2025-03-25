@@ -16,7 +16,7 @@ library(ggplot2)
 library(Hmisc) # for rcorr (correlation + significance)
 
 # 1. Read Excel & Rename
-df <- read_excel("/Users/vulgalace/Downloads/mybook.xlsx") %>%
+df <- read_excel("C:\\Users\\vulga\\jupyCOPY.xlsx") %>%
   rename(
     year = YEAR,
     ipeds_unit_id = IPEDS,
@@ -84,8 +84,6 @@ df_filtered <- df %>%
   filter(year_transition %in% target_transitions)
 
 # 7. KEEP ONLY TOP 18 SCHOOLS (rank <= 18 for ALL relevant rows)
-# First, find which ipeds_unit_id's never exceed rank 18 in df_filtered
-# 7. KEEP ONLY TOP 18 SCHOOLS
 top_18_ids <- df_filtered %>%
   dplyr::group_by(ipeds_unit_id) %>%
   dplyr::summarise(
@@ -97,7 +95,6 @@ top_18_ids <- df_filtered %>%
 
 df_filtered_top18 <- df_filtered %>%
   dplyr::filter(ipeds_unit_id %in% top_18_ids)
-
 
 cat("\n--- RETAINING ONLY 'TOP 18' SCHOOLS ---\n")
 cat("Rows before restricting to top 18 schools:", nrow(df_filtered), "\n")
@@ -148,10 +145,9 @@ print(summary(model_all))
 # ------------------------------------------------------------------------------
 # We'll now create combined plots for each faculty type. 
 # Each plot uses *all* rows in df_filtered_no_outliers (TOP 18 only, outliers removed).
-# The dot color is #555960 for every school except Purdue, which is #cfb991.
+# Purdue is colored #cfb991; all others are colored black.
 # The title uses official labels (e.g. "Associate Professors" instead of associate_change).
 
-# Map the column names to official faculty labels for the plot title/Y-axis
 fac_type_labels <- c(
   "assistant_change"     = "Assistant Professors",
   "associate_change"     = "Associate Professors",
@@ -162,7 +158,6 @@ fac_type_labels <- c(
   "pt_teach_nt_change"   = "Part-Time Teaching (Nontenure)"
 )
 
-# Define which faculty-change columns to examine:
 faculty_types <- c(
   "assistant_change",
   "associate_change",
@@ -193,44 +188,36 @@ for(fac_type in faculty_types) {
   df_sub <- df_sub %>%
     mutate(plot_color = ifelse(school_name == "Purdue University", 
                                "#cfb991",    # for Purdue
-                               "#555960"))   # for all others
+                               "#000000"))   # black for all others
   
   # Fit a simple linear regression: fac_change ~ rank_change
   formula_str <- paste0(fac_type, " ~ rank_change")
   model_fac <- lm(as.formula(formula_str), data = df_sub)
   
-  # Print model summary to console
   cat("Regression summary:\n")
   print(summary(model_fac))
   
-  # Extract slope, intercept, R^2, and p-value for the slope
+  # Extract slope, intercept, R^2, and p-value
   slope      <- coef(model_fac)[2]
   intercept  <- coef(model_fac)[1]
   r_squared  <- summary(model_fac)$r.squared
   p_value    <- summary(model_fac)$coefficients[2,4]  # p-value for slope
   
-  # Build annotation text for the plot
-  annot_text <- paste0(
-    "y = ", round(slope, 3), "x + ", round(intercept, 3),
-    "\nR² = ", round(r_squared, 3),
-    ", p = ", formatC(p_value, format = "e", digits = 2)
-  )
+  # Print equation info to console (instead of plotting it)
+  cat("\n--- COPY/PASTE EQUATION INFO ---\n")
+  cat("Equation (", fac_type_labels[fac_type], "):\n")
+  cat("   y =", round(slope, 3), "x +", round(intercept, 3), "\n")
+  cat("   R^2 =", round(r_squared, 3), "\n")
+  cat("   p =", formatC(p_value, format = "e", digits = 2), "\n")
+  cat("----------------------------------------\n\n")
   
-  # Determine extremes for annotation placement
-  x_min <- min(df_sub$rank_change, na.rm = TRUE)
-  x_max <- max(df_sub$rank_change, na.rm = TRUE)
-  y_min <- min(df_sub[[fac_type]], na.rm = TRUE)
-  y_max <- max(df_sub[[fac_type]], na.rm = TRUE)
-  
-  # Official label for the current faculty type:
+  # Build the ggplot
   fac_label <- fac_type_labels[fac_type]
   
-  # Build ggplot
   p_fac <- ggplot(df_sub, aes(x = rank_change, y = !!sym(fac_type))) +
-    # color each point using its hex code
     geom_point(aes(color = plot_color), size = 3) +
     scale_color_identity(guide = "none") +
-    geom_smooth(method = "lm", se = FALSE, color = "black") +  # add regression line
+    geom_smooth(method = "lm", se = FALSE, color = "red") +  # red regression line
     geom_vline(xintercept = 0, color = "black") +
     geom_hline(yintercept = 0, color = "black") +
     theme_minimal() +
@@ -238,17 +225,6 @@ for(fac_type in faculty_types) {
       title = paste0("Top 18 Schools – ", fac_label),
       x = "Rank Change (+ = Improved Ranking)",
       y = paste0(fac_label, " (+ = Gained Faculty)")
-    ) +
-    # place annotation in top-left corner by default
-    annotate(
-      "text",
-      x = x_min,
-      y = y_max,
-      label = annot_text,
-      hjust = 0,
-      vjust = 1,
-      size = 4,
-      fontface = "bold"
     )
   
   print(p_fac)
