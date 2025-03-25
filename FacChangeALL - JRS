@@ -13,7 +13,7 @@ library(ggplot2)
 library(Hmisc) # for rcorr (correlation + significance)
 
 # 1. Read Excel & Rename
-df <- read_excel("/Users/vulgalace/Downloads/jupyCOPY.xlsx") %>%
+df <- read_excel("C:\\Users\\vulga\\jupyCOPY.xlsx") %>%
   rename(
     year = YEAR,
     ipeds_unit_id = IPEDS,
@@ -168,15 +168,14 @@ for(fac_type in faculty_types) {
   
   # Create a 'color' column based on whether the school_name is Purdue:
   df_sub <- df_sub %>%
-    mutate(plot_color = ifelse(school_name == "Purdue University", 
+    mutate(plot_color = ifelse(school_name == "Purdue University",
                                "#cfb991",    # for Purdue
-                               "#555960"))   # for all others
+                               "#000000"))   # for all others
   
   # Fit a simple linear regression: fac_change ~ rank_change
   formula_str <- paste0(fac_type, " ~ rank_change")
   model_fac <- lm(as.formula(formula_str), data = df_sub)
   
-  # Print model summary to console
   cat("Regression summary:\n")
   print(summary(model_fac))
   
@@ -186,28 +185,23 @@ for(fac_type in faculty_types) {
   r_squared  <- summary(model_fac)$r.squared
   p_value    <- summary(model_fac)$coefficients[2,4]  # p-value for slope
   
-  # Build annotation text for the plot
-  annot_text <- paste0(
-    "y = ", round(slope, 3), "x + ", round(intercept, 3),
-    "\nR² = ", round(r_squared, 3),
-    ", p = ", formatC(p_value, format = "e", digits = 2)
-  )
-  
-  # Determine extremes for annotation placement
-  x_min <- min(df_sub$rank_change, na.rm = TRUE)
-  x_max <- max(df_sub$rank_change, na.rm = TRUE)
-  y_min <- min(df_sub[[fac_type]], na.rm = TRUE)
-  y_max <- max(df_sub[[fac_type]], na.rm = TRUE)
+  # Build the text that you'd like to copy/paste
+  # (NOT adding it as annotation on the plot)
+  cat("\n--- COPY/PASTE EQUATION INFO ---\n")
+  cat("Equation (", fac_type_labels[fac_type], "):\n")
+  cat("   y =", round(slope, 3), "x +", round(intercept, 3), "\n")
+  cat("   R^2 =", round(r_squared, 3), "\n")
+  cat("   p =", formatC(p_value, format = "e", digits = 2), "\n")
+  cat("----------------------------------------\n\n")
   
   # Official label for the current faculty type:
   fac_label <- fac_type_labels[fac_type]
   
-  # Build ggplot
+  # Build ggplot; regression line is red
   p_fac <- ggplot(df_sub, aes(x = rank_change, y = !!sym(fac_type))) +
-    # color each point using its hex code
     geom_point(aes(color = plot_color), size = 3) +
     scale_color_identity(guide = "none") +
-    geom_smooth(method = "lm", se = FALSE, color = "black") +  # add regression line
+    geom_smooth(method = "lm", se = FALSE, color = "red") +  # line is now red
     geom_vline(xintercept = 0, color = "black") +
     geom_hline(yintercept = 0, color = "black") +
     theme_minimal() +
@@ -215,17 +209,6 @@ for(fac_type in faculty_types) {
       title = paste0("All Transitions – ", fac_label),
       x = "Rank Change (+ = Improved Ranking)",
       y = paste0(fac_label, " (+ = Gained Faculty)")
-    ) +
-    # place annotation in top-left corner by default
-    annotate(
-      "text",
-      x = x_min,
-      y = y_max,
-      label = annot_text,
-      hjust = 0,
-      vjust = 1,
-      size = 4,
-      fontface = "bold"
     )
   
   print(p_fac)
