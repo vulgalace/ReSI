@@ -59,5 +59,172 @@ df <- df %>%
   mutate(
     rank_change = grad_rank - rank_next,
     
-    assistant_change   = assistant_next   - assistant_prof
-    
+    assistant_change   = assistant_next   - assistant_prof_sum,
+    associate_change   = associate_next   - associate_prof_sum,
+    full_change        = full_next        - full_prof_sum,
+    ft_res_change      = ft_res_next      - full_time_research_fac_sum,
+    pt_res_change      = pt_res_next      - part_time_research_fac_sum,
+    ft_teach_nt_change = ft_teach_nt_next - full_time_teaching_non_tenure_sum,
+    pt_teach_nt_change = pt_teach_nt_next - part_time_teaching_non_tenure_sum
+  ) %>%
+  filter(!is.na(year_next)) %>%
+  ungroup()
+
+# 5. Create year_transition Label
+df <- df %>%
+  mutate(year_transition = paste0(year, "-", year_next))
+
+# 6. Filter to Target Transitions
+target_transitions <- c(
+  "2015-2016", "2016-2017", "2017-2018", "2018-2019",
+  "2019-2020", "2020-2021", "2021-2022", "2022-2023"
+)
+
+df_filtered <- df %>%
+  filter(year_transition %in% target_transitions)
+
+# 7. KEEP ONLY TOP 5 SCHOOLS (rank <= 5 for ALL relevant rows)
+top_5_ids <- df_filtered %>%
+  group_by(ipeds_unit_id) %>%
+  summarise(
+    all_top_5 = all(grad_rank <= 5, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(all_top_5) %>%
+  pull(ipeds_unit_id)
+
+df_filtered_top5 <- df_filtered %>%
+  filter(ipeds_unit_id %in% top_5_ids)
+
+cat("\n--- RETAINING ONLY 'TOP 5' SCHOOLS ---\n")
+cat("Rows before restricting to top 5 schools:", nrow(df_filtered), "\n")
+cat("Rows after restricting to top 5 schools :", nrow(df_filtered_top5), "\n\n")
+
+# 8. Remove Outliers: abs(rank_change) > 20 or abs(any faculty_change) > 20
+df_filtered_no_outliers <- df_filtered_top5 %>%
+  filter(
+    abs(rank_change) <= 20,
+    abs(assistant_change)   <= 20,
+    abs(associate_change)   <= 20,
+    abs(full_change)        <= 20,
+    abs(ft_res_change)      <= 20,
+    abs(pt_res_change)      <= 20,
+    abs(ft_teach_nt_change) <= 20,
+    abs(pt_teach_nt_change) <= 20
+  )
+
+cat("\n--- REMOVED OUTLIERS ---\n")
+cat("Rows before removing outliers:", nrow(df_filtered_top5), "\n")
+cat("Rows after removing outliers :", nrow(df_filtered_no_outliers), "\n\n")
+
+# 9. Statistical Analysis (Console Output)
+cat("\n--- DESCRIPTIVE STATISTICS (TOP 5 SCHOOLS, Outliers Removed) ---\n")
+summary(df_filtered_no_outliers[, c("rank_change",
+                                    "assistant_change","associate_change","full_change",
+                                    "ft_res_change","pt_res_change",
+                                    "ft_teach_nt_change","pt_teach_nt_change")])
+
+cat("\n--- CORRELATION MATRIX (Pearson, TOP 5, Outliers Removed) ---\n")
+df_cor <- df_filtered_no_outliers %>%
+  select(rank_change, assistant_change, associate_change, full_change,
+         ft_res_change, pt_res_change, ft_teach_nt_change, pt_teach_nt_change)
+rc <- rcorr(as.matrix(df_cor), type="pearson")
+cat("Correlation Coefficients:\n")
+print(rc$r)
+cat("\nP-values:\n")
+print(rc$P)
+
+cat("\n--- MULTIPLE REGRESSION: rank_change ~ faculty changes (TOP 5, Outliers Removed) ---\n")
+model_all <- lm(rank_change ~ assistant_change + associate_change + full_change +
+                  ft_res_change + pt_res_change + ft_teach_nt_change + pt_teach_nt_change,
+                data=df_filtered_no_outliers)
+print(summary(model_all))
+
+# ------------------------------------------------------------------------------
+# 10. SINGLE-FACULTY PLOTS (All Target Transitions Combined, Top 5, Outliers Removed)
+# ------------------------------------------------------------------------------
+# We'll now create combined plots for each faculty type.
+# Each plot uses rows in df_filtered_no_outliers (TOP 5 only, outliers removed).
+# Purdue is colored #cfb991; all others are colored black (#000000).
+# The regression line is red, and slope/intercept/R²/p-value are printed to console only.
+
+fac_type_labels <- c(
+  "assistant_change"     = "Assistant Professors",
+  "associate_change"     = "Associate Professors",
+  "full_change"          = "Full Professors",
+  "ft_res_change"        = "Full-Time Research Faculty",
+  "pt_res_change"        = "Part-Time Research Faculty",
+  "ft_teach_nt_change"   = "Full-Time Teaching (Nontenure)",
+  "pt_teach_nt_change"   = "Part-Time Teaching (Nontenure)"
+)
+
+faculty_types <- c(
+  "assistant_change",
+  "associate_change",
+  "full_change",
+  "ft_res_change",
+  "pt_res_change",
+  "ft_teach_nt_change",
+  "pt_teach_nt_change"
+)
+
+for(fac_type in faculty_types) {
+  cat("\n----------------------------------------\n")
+  cat("FACULTY TYPE:", fac_type, "\n")
+  cat("----------------------------------------\n")
+  
+  # Prepare a simplified dataframe for plotting:
+  df_sub <- df_filtered_no_outliers %>%
+    select(school_name, rank_change, !!sym(fac_type)) %>%
+    filter(!is.na(rank_change) & !is.na(!!sym(fac_type)))  # drop NA rows
+  
+  # If no data remain, skip
+  if(nrow(df_sub) == 0) {
+    cat("No valid rows for", fac_type, ". Skipping.\n")
+    next
+  }
+  
+  # Create a 'color' column: Purdue (#cfb991), others (#000000)
+  df_sub <- df_sub %>%
+    mutate(plot_color = ifelse(school_name == "Purdue University",
+                               "#cfb991",
+                               "#000000"))
+  
+  # Fit a simple linear regression: fac_change ~ rank_change
+  formula_str <- paste0(fac_type, " ~ rank_change")
+  model_fac <- lm(as.formula(formula_str), data = df_sub)
+  
+  cat("Regression summary:\n")
+  print(summary(model_fac))
+  
+  # Extract slope, intercept, R^2, and p-value
+  slope      <- coef(model_fac)[2]
+  intercept  <- coef(model_fac)[1]
+  r_squared  <- summary(model_fac)$r.squared
+  p_value    <- summary(model_fac)$coefficients[2,4]
+  
+  cat("\n--- COPY/PASTE EQUATION INFO ---\n")
+  cat("Equation (", fac_type_labels[fac_type], "):\n")
+  cat("   y =", round(slope, 3), "x +", round(intercept, 3), "\n")
+  cat("   R^2 =", round(r_squared, 3), "\n")
+  cat("   p =", formatC(p_value, format = "e", digits = 2), "\n")
+  cat("----------------------------------------\n\n")
+  
+  # Build the ggplot with a red regression line
+  p_fac <- ggplot(df_sub, aes(x = rank_change, y = !!sym(fac_type))) +
+    geom_point(aes(color = plot_color), size = 3) +
+    scale_color_identity(guide = "none") +
+    geom_smooth(method = "lm", se = FALSE, color = "red") +  # red line
+    geom_vline(xintercept = 0, color = "black") +
+    geom_hline(yintercept = 0, color = "black") +
+    theme_minimal() +
+    labs(
+      title = paste0("Top 5 Schools (Outliers Removed) – ", fac_type_labels[fac_type]),
+      x = "Rank Change (+ = Improved Ranking)",
+      y = paste0(fac_type_labels[fac_type], " (+ = Gained Faculty)")
+    )
+  
+  print(p_fac)
+}
+
+cat("\nDone! One plot per faculty type displayed in the viewer.\n")
