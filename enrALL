@@ -1,0 +1,84 @@
+library(ggplot2)
+library(dplyr)
+library(readxl)
+
+# Load data (replace with your actual path)
+data <- read_excel("C:\\Users\\vulga\\degreeswork.xlsx")
+
+# Clean column names
+data <- data %>%
+  rename_with(~gsub(" ", "_", .x))
+
+# Coerce relevant columns to numeric and calculate total degrees
+data <- data %>%
+  mutate(
+    Grad_Rank = as.numeric(Grad_Rank),
+    Total_Bachelors_Sum = as.numeric(Total_Bachelors_Sum),
+    Total_Masters_Sum = as.numeric(Total_Masters_Sum),
+    Total_Doctoral_Sum = as.numeric(Total_Doctoral_Sum),
+    Total_Degrees_Sum = Total_Bachelors_Sum + Total_Masters_Sum + Total_Doctoral_Sum
+  )
+
+# Filter for clean data
+total_degrees_data <- data %>%
+  filter(
+    is.finite(Grad_Rank),
+    is.finite(Total_Degrees_Sum)
+  )
+
+# Analysis function
+run_analysis <- function(df, title_suffix) {
+  if (nrow(df) < 3) {
+    cat(sprintf("Skipping %s: Not enough data points.\n", title_suffix))
+    return(NULL)
+  }
+  
+  model <- lm(Grad_Rank ~ Total_Degrees_Sum, data = df)
+  summary_model <- summary(model)
+  
+  intercept <- coef(model)[1]
+  slope <- coef(model)[2]
+  r2 <- summary_model$r.squared
+  cat(sprintf("Model for %s:\n y = %.3f + %.3f*x\n R^2 = %.4f\n\n", title_suffix, intercept, slope, r2))
+  
+  df$Color <- ifelse(df$School_Name == "Purdue University", "#cfb991", "#000000")
+  
+  x_min <- min(df$Total_Degrees_Sum, na.rm = TRUE)
+  x_max <- max(df$Total_Degrees_Sum, na.rm = TRUE)
+  y_min <- min(df$Grad_Rank, na.rm = TRUE)
+  y_max <- max(df$Grad_Rank, na.rm = TRUE)
+  
+  ggplot(df, aes(x = Total_Degrees_Sum, y = Grad_Rank, color = Color)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "red") +
+    scale_color_identity() +
+    scale_x_continuous(limits = c(x_min, x_max)) +
+    scale_y_reverse(limits = c(y_max, y_min)) +
+    labs(title = paste("Grad Rank vs Total Degrees —", title_suffix),
+         x = "Total Degrees (Undergrad + Masters + PhD)",
+         y = "USNWR Grad Rank") +
+    theme_minimal()
+}
+
+# Run all groupings
+all_plot <- run_analysis(total_degrees_data, "All Schools")
+
+top18 <- total_degrees_data %>% filter(Grad_Rank <= 18)
+top18_plot <- run_analysis(top18, "Top 18")
+
+top18_pub <- top18 %>% filter(Type == "Public")
+top18_pub_plot <- run_analysis(top18_pub, "Top 18 Public")
+
+top18_priv <- top18 %>% filter(Type == "Private")
+top18_priv_plot <- run_analysis(top18_priv, "Top 18 Private")
+
+top10_plot <- run_analysis(total_degrees_data %>% filter(Grad_Rank <= 10), "Top 10")
+top5_plot <- run_analysis(total_degrees_data %>% filter(Grad_Rank <= 5), "Top 5")
+
+# Display plots (optional)
+print(all_plot)
+print(top18_plot)
+print(top18_priv_plot)
+print(top18_pub_plot)
+print(top10_plot)
+print(top5_plot)
