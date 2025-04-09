@@ -1,19 +1,20 @@
 # ------------------------------------------------------------------------------
 # SCRIPT: ALL SCHOOLS - OUTLIERS REMOVED, STATISTICS + SINGLE-FACULTY PLOTS
 # ------------------------------------------------------------------------------
-# Removes rows where abs(rank_change) > 20 OR abs(...) > 20 in any faculty column
-# Then performs the same analysis and plotting (one plot per faculty type).
-# ------------------------------------------------------------------------------
 
-# install.packages(c("readxl","dplyr","tidyr","ggplot2","Hmisc")) # if needed
 library(readxl)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
-library(Hmisc) # for rcorr (correlation + significance)
+library(Hmisc)
 
-# 1. Read Excel & Rename
-df <- read_excel("C:\\Users\\vulga\\jupyCOPY.xlsx") %>%
+# --- FILE PATHS ---
+input_file <- "/Users/vulgalace/Downloads/jupyCOPY.xlsx"
+output_dir <- "/Users/vulgalace/Downloads/faculty_plots/"
+dir.create(output_dir, showWarnings = FALSE)  # Create save folder if it doesn't exist
+
+# 1. Read Excel & Rename Columns
+df <- read_excel(input_file) %>%
   rename(
     year = YEAR,
     ipeds_unit_id = IPEDS,
@@ -31,13 +32,10 @@ df <- read_excel("C:\\Users\\vulga\\jupyCOPY.xlsx") %>%
     part_time_teaching_non_tenure_sum = `PT TEACHING FAC (NONT) SUM`
   )
 
-# 2. Sort & Group
+# 2–5. Data Preparation
 df <- df %>%
   arrange(ipeds_unit_id, year) %>%
-  group_by(ipeds_unit_id)
-
-# 3. Create Next-Year Columns
-df <- df %>%
+  group_by(ipeds_unit_id) %>%
   mutate(
     assistant_next   = lead(assistant_prof_sum),
     associate_next   = lead(associate_prof_sum),
@@ -46,16 +44,11 @@ df <- df %>%
     pt_res_next      = lead(part_time_research_fac_sum),
     ft_teach_nt_next = lead(full_time_teaching_non_tenure_sum),
     pt_teach_nt_next = lead(part_time_teaching_non_tenure_sum),
-    
-    rank_next = lead(grad_rank),
-    year_next = lead(year)
-  )
-
-# 4. Compute Deltas
-df <- df %>%
+    rank_next        = lead(grad_rank),
+    year_next        = lead(year)
+  ) %>%
   mutate(
     rank_change = grad_rank - rank_next,
-    
     assistant_change   = assistant_next   - assistant_prof_sum,
     associate_change   = associate_next   - associate_prof_sum,
     full_change        = full_next        - full_prof_sum,
@@ -65,10 +58,7 @@ df <- df %>%
     pt_teach_nt_change = pt_teach_nt_next - part_time_teaching_non_tenure_sum
   ) %>%
   filter(!is.na(year_next)) %>%
-  ungroup()
-
-# 5. Create year_transition Label
-df <- df %>%
+  ungroup() %>%
   mutate(year_transition = paste0(year, "-", year_next))
 
 # 6. Filter to Target Transitions
@@ -76,11 +66,10 @@ target_transitions <- c(
   "2015-2016", "2016-2017", "2017-2018", "2018-2019",
   "2019-2020", "2020-2021", "2021-2022", "2022-2023"
 )
-
 df_filtered <- df %>%
   filter(year_transition %in% target_transitions)
 
-# 7. Remove Outliers: abs(rank_change) > 20 or abs(any faculty_change) > 20
+# 7. Remove Outliers
 df_filtered_no_outliers <- df_filtered %>%
   filter(
     abs(rank_change) <= 20,
@@ -97,22 +86,19 @@ cat("\n--- REMOVED OUTLIERS ---\n")
 cat("Rows before removing outliers:", nrow(df_filtered), "\n")
 cat("Rows after removing outliers :", nrow(df_filtered_no_outliers), "\n\n")
 
-# 8. Statistical Analysis (Console Output)
+# 8. Console Stats
 cat("\n--- DESCRIPTIVE STATISTICS (All Schools, Outliers Removed) ---\n")
 summary(df_filtered_no_outliers[, c("rank_change",
                                     "assistant_change","associate_change","full_change",
                                     "ft_res_change","pt_res_change",
                                     "ft_teach_nt_change","pt_teach_nt_change")])
-
 cat("\n--- CORRELATION MATRIX (Pearson, Outliers Removed) ---\n")
 df_cor <- df_filtered_no_outliers %>%
   select(rank_change, assistant_change, associate_change, full_change,
          ft_res_change, pt_res_change, ft_teach_nt_change, pt_teach_nt_change)
 rc <- rcorr(as.matrix(df_cor), type="pearson")
-cat("Correlation Coefficients:\n")
-print(rc$r)
-cat("\nP-values:\n")
-print(rc$P)
+cat("Correlation Coefficients:\n"); print(rc$r)
+cat("\nP-values:\n"); print(rc$P)
 
 cat("\n--- MULTIPLE REGRESSION: rank_change ~ faculty changes (Outliers Removed) ---\n")
 model_all <- lm(rank_change ~ assistant_change + associate_change + full_change +
@@ -120,15 +106,7 @@ model_all <- lm(rank_change ~ assistant_change + associate_change + full_change 
                 data=df_filtered_no_outliers)
 print(summary(model_all))
 
-# ------------------------------------------------------------------------------
-# 9. SINGLE-FACULTY PLOTS (All Target Transitions Combined, Outliers Removed)
-# ------------------------------------------------------------------------------
-# We'll now create combined plots for each faculty type. 
-# Each plot uses *all* rows in df_filtered_no_outliers.
-# The dot color is #555960 for every school except Purdue, which is #cfb991.
-# The title uses official labels (e.g. "Associate Professors" instead of associate_change).
-
-# Map the column names to official faculty labels for the plot title/Y-axis
+# 9. SINGLE-FACULTY PLOTS + SAVE TO FILE
 fac_type_labels <- c(
   "assistant_change"     = "Assistant Professors",
   "associate_change"     = "Associate Professors",
@@ -139,15 +117,14 @@ fac_type_labels <- c(
   "pt_teach_nt_change"   = "Part-Time Teaching (Nontenure)"
 )
 
-# Define which faculty-change columns to examine:
 faculty_types <- c(
-  "assistant_change",
-  "associate_change",
   "full_change",
-  "ft_res_change",
-  "pt_res_change",
+  "associate_change",
+  "assistant_change",
   "ft_teach_nt_change",
-  "pt_teach_nt_change"
+  "ft_res_change",
+  "pt_teach_nt_change",
+  "pt_res_change"
 )
 
 for(fac_type in faculty_types) {
@@ -155,63 +132,54 @@ for(fac_type in faculty_types) {
   cat("FACULTY TYPE:", fac_type, "\n")
   cat("----------------------------------------\n")
   
-  # Prepare a simplified dataframe for plotting:
   df_sub <- df_filtered_no_outliers %>%
     select(school_name, rank_change, !!sym(fac_type)) %>%
-    filter(!is.na(rank_change) & !is.na(!!sym(fac_type)))  # drop NA rows
+    filter(!is.na(rank_change) & !is.na(!!sym(fac_type)))
   
-  # If no data remain, skip
   if(nrow(df_sub) == 0) {
     cat("No valid rows for", fac_type, ". Skipping.\n")
     next
   }
   
-  # Create a 'color' column based on whether the school_name is Purdue:
   df_sub <- df_sub %>%
-    mutate(plot_color = ifelse(school_name == "Purdue University",
-                               "#cfb991",    # for Purdue
-                               "#000000"))   # for all others
+    mutate(plot_color = ifelse(school_name == "Purdue University", "#cfb991", "#000000"))
   
-  # Fit a simple linear regression: fac_change ~ rank_change
   formula_str <- paste0(fac_type, " ~ rank_change")
   model_fac <- lm(as.formula(formula_str), data = df_sub)
   
-  cat("Regression summary:\n")
-  print(summary(model_fac))
+  slope     <- coef(model_fac)[2]
+  intercept <- coef(model_fac)[1]
+  r_squared <- summary(model_fac)$r.squared
+  p_value   <- summary(model_fac)$coefficients[2,4]
   
-  # Extract slope, intercept, R^2, and p-value for the slope
-  slope      <- coef(model_fac)[2]
-  intercept  <- coef(model_fac)[1]
-  r_squared  <- summary(model_fac)$r.squared
-  p_value    <- summary(model_fac)$coefficients[2,4]  # p-value for slope
+  r_squared_str <- if (r_squared < 0.001) "<0.001" else as.character(round(r_squared, 3))
   
-  # Build the text that you'd like to copy/paste
-  # (NOT adding it as annotation on the plot)
-  cat("\n--- COPY/PASTE EQUATION INFO ---\n")
-  cat("Equation (", fac_type_labels[fac_type], "):\n")
-  cat("   y =", round(slope, 3), "x +", round(intercept, 3), "\n")
-  cat("   R^2 =", round(r_squared, 3), "\n")
-  cat("   p =", formatC(p_value, format = "e", digits = 2), "\n")
-  cat("----------------------------------------\n\n")
+  # ---- CLEAN CONSOLE OUTPUT ----
+  cat("\n", fac_type_labels[fac_type], "\n", sep = "")
+  cat("y = ", round(slope, 3), "x + ", round(intercept, 3),
+      ", r² = ", r_squared_str,
+      ", p = ", formatC(p_value, format = "e", digits = 2), "\n", sep = "")
+  cat("----------------------------------------\n")
   
-  # Official label for the current faculty type:
-  fac_label <- fac_type_labels[fac_type]
-  
-  # Build ggplot; regression line is red
+  # ---- PLOT (No annotation) ----
   p_fac <- ggplot(df_sub, aes(x = rank_change, y = !!sym(fac_type))) +
     geom_point(aes(color = plot_color), size = 3) +
     scale_color_identity(guide = "none") +
-    geom_smooth(method = "lm", se = FALSE, color = "red") +  # line is now red
+    geom_smooth(method = "lm", se = FALSE, color = "red") +
     geom_vline(xintercept = 0, color = "black") +
     geom_hline(yintercept = 0, color = "black") +
     theme_minimal() +
-    labs(
-      title = paste0("All Transitions – ", fac_label),
-      x = "Rank Change (+ = Improved Ranking)",
-      y = paste0(fac_label, " (+ = Gained Faculty)")
+    theme(
+      plot.title = element_blank(),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank()
     )
   
   print(p_fac)
+  
+  # ---- SAVE PLOT TO FILE ----
+  filename <- paste0(output_dir, "faculty_plot_", fac_type, ".png")
+  ggsave(filename = filename, plot = p_fac, width = 6, height = 5, dpi = 300)
 }
 
-cat("\nDone! One plot per faculty type displayed in the viewer.\n")
+cat("\nDone! One plot per faculty type saved to: ", output_dir, "\n")
