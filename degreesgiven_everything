@@ -18,7 +18,7 @@ data <- read_excel(input_path) %>%
   ) %>%
   mutate(Total_Degrees_Sum = Total_Bachelors_Sum + Total_Masters_Sum + Total_Doctoral_Sum)
 
-# Degree categories
+# Degree types
 degree_types <- list(
   Bachelors = "Total_Bachelors_Sum",
   Masters = "Total_Masters_Sum",
@@ -26,7 +26,7 @@ degree_types <- list(
   Total = "Total_Degrees_Sum"
 )
 
-# Subgroups (Updated to Top 17)
+# Subgroup filters (using Top 17 as baseline)
 subgroup_filters <- list(
   "All" = function(df) df,
   "Top 17" = function(df) df %>% filter(Grad_Rank <= 17),
@@ -36,70 +36,69 @@ subgroup_filters <- list(
   "Top 17 Private" = function(df) df %>% filter(Grad_Rank <= 17, Type == "Private")
 )
 
-# Analysis + Save function
-run_analysis <- function(df, x_col, subgroup_name, degree_name) {
+# Analysis function
+run_analysis <- function(df, x_col, degree_name, subgroup_name) {
   df <- df %>%
     filter(is.finite(Grad_Rank), is.finite(.data[[x_col]]))
-  
+
   if (nrow(df) < 3) {
-    cat(sprintf("Skipping %s — %s: Not enough data points.\n\n", subgroup_name, degree_name))
+    cat(sprintf("Skipping %s — %s: Not enough data points.\n\n", degree_name, subgroup_name))
     return(NULL)
   }
-  
+
   formula <- as.formula(paste("Grad_Rank ~", x_col))
   model <- lm(formula, data = df)
   summary_model <- summary(model)
-  
+
   slope <- coef(model)[2]
   intercept <- coef(model)[1]
   r2 <- summary_model$r.squared
   p_val <- summary_model$coefficients[2, 4]
   r2_str <- if (r2 < 0.001) "<0.001" else round(r2, 3)
-  
-  # Console copy/paste output
-  cat("\n", subgroup_name, " — ", degree_name, "\n", sep = "")
+
+  # Console output
+  cat("\n", degree_name, " — ", subgroup_name, "\n", sep = "")
   cat("y = ", round(slope, 3), "x + ", round(intercept, 3),
       ", r² = ", r2_str,
       ", p = ", formatC(p_val, format = "e", digits = 2), "\n", sep = "")
   cat("----------------------------------------\n")
-  
-  # Purdue coloring
+
   df$Color <- ifelse(df$School_Name == "Purdue University", "#cfb991", "#000000")
-  
-  # Plot
+
+  # Plot with y-axis starting at 1
   plot <- ggplot(df, aes(x = .data[[x_col]], y = Grad_Rank)) +
     geom_point(aes(color = Color), size = 3.5) +
     geom_smooth(method = "lm", se = FALSE, color = "red", size = 1.2) +
     scale_color_identity(guide = "none") +
     scale_x_continuous(limits = c(min(df[[x_col]], na.rm = TRUE), max(df[[x_col]], na.rm = TRUE))) +
-    scale_y_reverse(limits = c(max(df$Grad_Rank, na.rm = TRUE), min(df$Grad_Rank, na.rm = TRUE))) +
+    scale_y_continuous(limits = c(1, max(df$Grad_Rank, na.rm = TRUE))) +
     theme_minimal() +
     theme(
       plot.title = element_blank(),
       axis.title.x = element_blank(),
       axis.title.y = element_blank()
     )
-  
+
   print(plot)
-  
-  # Save plot
-  output_subdir <- file.path(base_output_dir, subgroup_name, degree_name)
+
+  # Save file
+  output_subdir <- file.path(base_output_dir, degree_name, subgroup_name)
   dir.create(output_subdir, recursive = TRUE, showWarnings = FALSE)
   filename <- file.path(output_subdir, paste0("degree_plot_", degree_name, ".png"))
   ggsave(filename = filename, plot = plot, width = 6, height = 5, dpi = 300)
 }
 
-# Loop over degrees + subgroups
+# Loop and run all
 for (degree_label in names(degree_types)) {
   degree_col <- degree_types[[degree_label]]
-  
+
   cat("\n=============================\n")
   cat(paste("DEGREE LEVEL:", degree_label, "\n"))
   cat("=============================\n")
-  
+
   for (group_label in names(subgroup_filters)) {
     filtered_df <- subgroup_filters[[group_label]](data)
-    run_analysis(filtered_df, degree_col, group_label, degree_label)
+    run_analysis(filtered_df, degree_col, degree_label, group_label)
   }
 }
 
