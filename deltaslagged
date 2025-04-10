@@ -1,0 +1,134 @@
+library(tidyverse)
+library(scales)
+
+# Load data
+university_data <- read.csv("/Users/vulgalace/Downloads/headsdata.csv")
+names(university_data)[6] <- "GradRank"
+names(university_data)[7] <- "USNWRScore"
+names(university_data)[4] <- "DeptHeadSurname"
+names(university_data)[8] <- "Type"
+
+# Output folder
+output_dir <- "/Users/vulgalace/Downloads/heads_plots_lagged/"
+dir.create(output_dir, showWarnings = FALSE)
+
+# Calculate "New Heads Delta"
+calculate_new_heads_delta <- function(data) {
+  years <- sort(unique(as.numeric(as.character(data$Year))))
+  results <- data.frame(
+    Year = years[-1],
+    PrevYear = years[-length(years)],
+    NewHeadsDelta = numeric(length(years) - 1)
+  )
+  for (i in 1:(length(years) - 1)) {
+    year1 <- years[i]
+    year2 <- years[i + 1]
+    data1 <- data %>% filter(Year == year1)
+    data2 <- data %>% filter(Year == year2)
+    new_surnames <- setdiff(data2$DeptHeadSurname, data1$DeptHeadSurname)
+    results$NewHeadsDelta[i] <- length(new_surnames)
+  }
+  return(results)
+}
+
+# Compute average USNWR score deltas
+compute_avg_score_delta <- function(data) {
+  years <- sort(unique(as.numeric(as.character(data$Year))))
+  results <- data.frame(
+    Year = years[-1],
+    PrevYear = years[-length(years)],
+    AvgScoreDelta = numeric(length(years) - 1)
+  )
+  for (i in 1:(length(years) - 1)) {
+    y1 <- years[i]
+    y2 <- years[i + 1]
+    s1 <- mean(data %>% filter(Year == y1) %>% pull(USNWRScore), na.rm = TRUE)
+    s2 <- mean(data %>% filter(Year == y2) %>% pull(USNWRScore), na.rm = TRUE)
+    results$AvgScoreDelta[i] <- s2 - s1
+  }
+  return(results)
+}
+
+# Group selector
+get_top_n_by_year <- function(data, n) {
+  data %>%
+    group_by(Year) %>%
+    arrange(GradRank, .by_group = TRUE) %>%
+    slice_head(n = n) %>%
+    ungroup()
+}
+
+# Define plot colors
+plot_colors <- c(
+  "All Universities" = "#1f77b4",
+  "Top 17 Universities" = "#ff7f0e",
+  "Top 17 Public Universities" = "#2ca02c",
+  "Top 17 Private Universities" = "#d62728",
+  "Top 10 Universities" = "#9467bd",
+  "Top 5 Universities" = "#8c564b"
+)
+
+# Define subgroups and labels
+subgroups <- list(
+  "All Universities" = university_data,
+  "Top 17 Universities" = get_top_n_by_year(university_data, 17),
+  "Top 17 Public Universities" = get_top_n_by_year(university_data %>% filter(Type == "Public"), 17),
+  "Top 17 Private Universities" = get_top_n_by_year(university_data %>% filter(Type == "Private"), 17),
+  "Top 10 Universities" = get_top_n_by_year(university_data, 10),
+  "Top 5 Universities" = get_top_n_by_year(university_data, 5)
+)
+
+# Calculate lagged NewHeadsDelta (shift year forward by 1)
+global_new_heads <- calculate_new_heads_delta(university_data) %>%
+  mutate(Year = Year + 1)
+
+# Dual-axis plot function
+create_dual_axis_plot <- function(metrics_data, plot_color, output_name) {
+  if (nrow(metrics_data) == 0 || max(abs(metrics_data$AvgScoreDelta)) == 0) return(NULL)
+  
+  # Join score delta with lagged heads
+  plot_data <- merge(metrics_data, global_new_heads, by = "Year")
+  plot_data$YearLabel <- paste(plot_data$PrevYear, "-", plot_data$Year, sep = "")
+  
+  # Scale NewHeadsDelta to match y-axis
+  scale_factor <- max(abs(plot_data$AvgScoreDelta)) / max(abs(plot_data$NewHeadsDelta))
+  
+  ggplot(plot_data, aes(x = YearLabel)) +
+    geom_line(aes(y = AvgScoreDelta, group = 1), color = plot_color, size = 1.2) +
+    geom_point(aes(y = AvgScoreDelta), color = plot_color, size = 3) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray") +
+    
+    geom_line(aes(y = NewHeadsDelta * scale_factor, group = 1), color = "red", size = 1.2) +
+    geom_point(aes(y = NewHeadsDelta * scale_factor), color = "red", size = 3) +
+    
+    scale_y_continuous(
+      name = NULL,
+      sec.axis = sec_axis(~ . / scale_factor, name = NULL)
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_blank(),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(),
+      axis.title.y.right = element_blank(),
+      axis.text = element_text(color = "black", size = 10),
+      legend.position = "none"
+    )
+}
+
+# Generate and save plots
+for (group in names(subgroups)) {
+  score_deltas <- compute_avg_score_delta(subgroups[[group]])
+  color <- plot_colors[group]
+  plot_obj <- create_dual_axis_plot(score_deltas, plot_color = color, output_name = group)
+  
+  if (!is.null(plot_obj)) {
+    ggsave(
+      filename = paste0(output_dir, "lagged_plot_", gsub(" ", "_", tolower(group)), ".png"),
+      plot = plot_obj,
+      width = 10, height = 6, dpi = 300
+    )
+  }
+}
+
+cat("✅ Lagged-style plots saved to:", output_dir, "\n")
