@@ -131,4 +131,4 @@ for (group in names(subgroups)) {
   }
 }
 
-cat("✅ Lagged-style plots saved to:", output_dir, "\n")
+cat("Lagged-style plots saved to:", output_dir, "\n")
