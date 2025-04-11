@@ -1,0 +1,121 @@
+library(readxl)
+library(dplyr)
+library(ggplot2)
+
+# Load and clean
+df <- read_excel("/Users/vulgalace/Downloads/mybook.xlsx") %>%
+  rename(
+    year = YEAR,
+    ipeds_unit_id = IPEDS,
+    grad_rank = RANK,
+    discipline_name = DISCIPLINE,
+    school_name = UNIVERSITY,
+    TYPE = TYPE,  # ensures case
+    assistant_prof_sum = `ASSISTANT PROF SUM`,
+    associate_prof_sum = `ASSOCIATE PROF SUM`,
+    full_prof_sum = `FULL PROF SUM`
+  )
+
+# Calculate transitions
+df <- df %>%
+  arrange(ipeds_unit_id, year) %>%
+  group_by(ipeds_unit_id) %>%
+  mutate(
+    assistant_next = lead(assistant_prof_sum),
+    associate_next = lead(associate_prof_sum),
+    full_next = lead(full_prof_sum),
+    rank_next = lead(grad_rank),
+    year_next = lead(year),
+    assistant_change = assistant_next - assistant_prof_sum,
+    associate_change = associate_next - associate_prof_sum,
+    full_change = full_next - full_prof_sum,
+    rank_change = grad_rank - rank_next,
+    year_transition = paste0(year, "-", year_next)
+  ) %>%
+  filter(!is.na(rank_next)) %>%
+  ungroup() %>%
+  mutate(
+    total_tt_change = assistant_change + associate_change + full_change
+  )
+
+# Filter transitions
+target_transitions <- c(
+  "2015-2016", "2016-2017", "2017-2018", "2018-2019",
+  "2019-2020", "2020-2021", "2021-2022", "2022-2023"
+)
+df_filtered <- df %>% filter(year_transition %in% target_transitions)
+
+# Remove outliers
+df_clean <- df_filtered %>%
+  filter(
+    abs(rank_change) <= 20,
+    abs(assistant_change) <= 20,
+    abs(associate_change) <= 20,
+    abs(full_change) <= 20
+  )
+
+# Define subgroups
+subgroups <- list(
+  "All" = df_clean,
+  "Top 17" = df_clean %>% filter(grad_rank <= 17),
+  "Top 17 Public" = df_clean %>% filter(grad_rank <= 17 & TYPE == "Public"),
+  "Top 17 Private" = df_clean %>% filter(grad_rank <= 17 & TYPE == "Private"),
+  "Top 10" = df_clean %>% filter(grad_rank <= 10),
+  "Top 5" = df_clean %>% filter(grad_rank <= 5)
+)
+
+# Set output structure
+output_base <- "/Users/vulgalace/Downloads/faculty_TT/"
+dir.create(output_base, showWarnings = FALSE)
+
+# Generate analysis + plots
+for (group_name in names(subgroups)) {
+  group_data <- subgroups[[group_name]] %>%
+    filter(!is.na(rank_change), !is.na(total_tt_change))
+  
+  if (nrow(group_data) < 3) {
+    cat("Skipping", group_name, "- not enough data.\n")
+    next
+  }
+  
+  # Linear model
+  model <- lm(total_tt_change ~ rank_change, data = group_data)
+  smry <- summary(model)
+  
+  slope <- coef(model)[2]
+  intercept <- coef(model)[1]
+  r2 <- smry$r.squared
+  pval <- smry$coefficients[2, 4]
+  r2_str <- ifelse(r2 < 0.001, "<0.001", round(r2, 3))
+  
+  cat("\n", group_name, "\n", sep = "")
+  cat("y = ", round(slope, 3), "x + ", round(intercept, 3),
+      ", r² = ", r2_str,
+      ", p = ", formatC(pval, format = "e", digits = 2), "\n", sep = "")
+  cat("----------------------------------------\n")
+  
+  # Plot
+  group_data <- group_data %>%
+    mutate(color = ifelse(school_name == "Purdue University", "#cfb991", "#000000"))
+  
+  plot <- ggplot(group_data, aes(x = rank_change, y = total_tt_change)) +
+    geom_point(aes(color = color), size = 3) +
+    scale_color_identity() +
+    geom_smooth(method = "lm", se = FALSE, color = "red") +
+    geom_vline(xintercept = 0, color = "black") +
+    geom_hline(yintercept = 0, color = "black") +
+    theme_minimal() +
+    theme(
+      plot.title = element_blank(),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(),
+      axis.text = element_text(size = 11, color = "black")
+    )
+  
+  dir_path <- file.path(output_base, paste0("Group_", gsub(" ", "_", group_name)))
+  dir.create(dir_path, showWarnings = FALSE)
+  ggsave(filename = file.path(dir_path, "tt_faculty_vs_rankchange.png"),
+         plot = plot, width = 8, height = 6, dpi = 300)
+}
+
+cat("✅ T/TT faculty analysis complete. Plots saved to:", output_base, "\n")
