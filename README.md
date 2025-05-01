@@ -6,7 +6,7 @@ This repository contains all R-based code and documentation developed by the Res
 ## Requirements
 - R ≥ 4.1.0
 - RStudio (recommended)
-- Required packages:
+- Some packages:
   - `tidyverse`
   - `lubridate`
   - `ggplot2`
